@@ -2,10 +2,65 @@
 title: "Predicting Bikeshare Demand"
 author: "Johnathan Clementi"
 date: "11/19/2021"
-output: html_document
+output:
+  rmdformats::downcute:
+    self_contained: true
+    thumbnails: true
+    lightbox: false
+    gallery: false
+    highlight: tango
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(sf)
+library(lubridate)
+library(tigris)
+library(gganimate)
+library(riem)
+library(gridExtra)
+library(knitr)
+library(kableExtra)
+library(rmdformats)
+
+options(tigris_class = "sf")
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
+
+palette5 <- c("#eff3ff","#bdd7e7","#6baed6","#3182bd","#08519c")
+palette4 <- c("#D2FBD4","#92BCAB","#527D82","#123F5A")
+palette2 <- c("#6baed6","#08519c")
+```
+
+# 1. Data Wrangling
+
+Capital Bikeshare ride data obtained from this [link](https://s3.amazonaws.com/capitalbikeshare-data/index.html)
+More information about these data can be found at this [link](https://www.capitalbikeshare.com/system-data)
+```{r}
+# Rideshare data were previously downloaded for April, May, and June of 2019 (Pre-pandemic) from the link above.
+root.dir = "D:/Users/Johnathan/Google Drive/Grad School/PennDesign_MUSA/PublicPolicyAnalytics/predictingBikeshareDemand/data"
+rideApril <- read.csv(file.path(root.dir,"201904-capitalbikeshare-tripdata.csv"))
+rideMay <- read.csv(file.path(root.dir,"201905-capitalbikeshare-tripdata.csv"))
+rideJune <- read.csv(file.path(root.dir,"201906-capitalbikeshare-tripdata.csv"))
+ride <- rbind(rideApril,rideMay,rideJune)
+
+rm(rideApril,rideMay,rideJune)
+```
+
+
+```{r}
+# Retrieve location data for Capital Bikeshare dock locations
+crs <- 'ESRI:102285' #StatePlane Maryland
+docks <- st_read("https://opendata.arcgis.com/datasets/a1f7acf65795451d89f0a38565a975b3_5.geojson") %>%
+  st_transform(crs) %>%
+  dplyr::select(OBJECTID, LONGITUDE, LATITUDE, NAME, CAPACITY, REGION_NAME)
+```
+
+### Merge data
+```{r}
+test <- 
+  dplyr::left_join(ride, docks, by =c("Start.station" = "NAME"))
+testy <- test %>% filter(is.na(OBJECTID))
 ```
 
