@@ -12,8 +12,18 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+	error = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	cache = TRUE,
+	include = FALSE
+)
+```
 
+# Introduction
+
+```{r setup, include=FALSE}
 library(tidyverse)
 library(sf)
 library(lubridate)
@@ -33,34 +43,106 @@ palette4 <- c("#D2FBD4","#92BCAB","#527D82","#123F5A")
 palette2 <- c("#6baed6","#08519c")
 ```
 
-# 1. Data Wrangling
+
+# 2 Data Wrangling
 
 Capital Bikeshare ride data obtained from this [link](https://s3.amazonaws.com/capitalbikeshare-data/index.html)
 More information about these data can be found at this [link](https://www.capitalbikeshare.com/system-data)
-```{r}
+```{r include=FALSE}
 # Rideshare data were previously downloaded for April, May, and June of 2019 (Pre-pandemic) from the link above.
 root.dir = "D:/Users/Johnathan/Google Drive/Grad School/PennDesign_MUSA/PublicPolicyAnalytics/predictingBikeshareDemand/data"
-rideApril <- read.csv(file.path(root.dir,"201904-capitalbikeshare-tripdata.csv"))
-rideMay <- read.csv(file.path(root.dir,"201905-capitalbikeshare-tripdata.csv"))
-rideJune <- read.csv(file.path(root.dir,"201906-capitalbikeshare-tripdata.csv"))
-ride <- rbind(rideApril,rideMay,rideJune)
 
-rm(rideApril,rideMay,rideJune)
+crs <- 'ESRI:102285' #StatePlane Maryland
+```
+
+
+```{r}
+rides <- rbind(#read.csv(file.path(root.dir,"202108-capitalbikeshare-tripdata.csv")),
+              read.csv(file.path(root.dir,"202109-capitalbikeshare-tripdata.csv")),
+              read.csv(file.path(root.dir,"202110-capitalbikeshare-tripdata.csv"))
+              )
+
+rides <- rides %>%
+  mutate(started_at = ymd_hms(started_at),
+         ended_at = ymd_hms(ended_at),
+         interval60 = floor_date(ymd_hms(started_at), unit = "hour"),
+         interval15 = floor_date(ymd_hms(started_at), unit = "15 mins"),
+         week = week(interval60),
+         dotw = wday(interval60, label=TRUE)
+        ) 
+#%>%
+  #st_as_sf(coords = c("start_lng", "start_lat"), crs=crs)
 ```
 
 
 ```{r}
 # Retrieve location data for Capital Bikeshare dock locations
-crs <- 'ESRI:102285' #StatePlane Maryland
+# Remove regions except for Washington DC because we don't have the computational resources for analyzing the entire population of bikeshare locations
 docks <- st_read("https://opendata.arcgis.com/datasets/a1f7acf65795451d89f0a38565a975b3_5.geojson") %>%
   st_transform(crs) %>%
-  dplyr::select(OBJECTID, LONGITUDE, LATITUDE, NAME, CAPACITY, REGION_NAME)
+  dplyr::select(OBJECTID, LONGITUDE, LATITUDE, NAME, CAPACITY, REGION_NAME) %>%
+  filter(REGION_NAME == "Washington, DC")
 ```
 
-### Merge data
+### 2.1 Link rides with stations
 ```{r}
-test <- 
-  dplyr::left_join(ride, docks, by =c("Start.station" = "NAME"))
-testy <- test %>% filter(is.na(OBJECTID))
+startRide_docks <- 
+  dplyr::left_join(st_drop_geometry(rides), docks, by =c("start_station_name" = "NAME")) %>%
+  st_sf() %>% 
+  filter(is.na(OBJECTID) == FALSE)
+
+# endRide_docks <- 
+#   dplyr::left_join(st_drop_geometry(rides), docks, by =c("end_station_name" = "NAME")) %>%
+#   st_sf() %>% 
+#   filter(is.na(OBJECTID) == FALSE)
+```
+
+### 2.2 Weather Data
+```{r}
+# riem_networks <- riem_networks()
+# vaStations <- riem_stations("VA_ASOS") %>%
+#   st_as_sf(coords = c("lon","lat"), crs=crs)
+# mdStations <- riem_stations("MD_ASOS") %>%
+#   st_as_sf(coords = c("lon","lat"), crs=crs)
+# The closest weather station to our study area is at Reagan National Airport - "DCA"
+
+weather.Data <- 
+  riem_measures(station = "DCA", date_start = "2021-09-01", date_end = "2021-10-31")
+
+weather.Panel <-  
+  weather.Data %>%
+    mutate_if(is.character, list(~replace(as.character(.), is.na(.), "0"))) %>% 
+    replace(is.na(.), 0) %>%
+    mutate(interval60 = ymd_h(substr(valid, 1, 13))) %>%
+    mutate(week = week(interval60),
+           dotw = wday(interval60, label=TRUE)) %>%
+    group_by(interval60) %>%
+    summarize(Temperature = max(tmpf),
+              Precipitation = sum(p01i),
+              Wind_Speed = max(sknt)) %>%
+    mutate(Temperature = ifelse(Temperature == 0, 42, Temperature))
+
+grid.arrange(top = "Weather Data - Washington, DC - September - October, 2021",
+  ggplot(weather.Panel, aes(interval60,Percipitation)) + geom_line() + 
+    labs(title="Precipitation", x="Hour", y="Percipitation") + plotTheme(),
+  ggplot(weather.Panel, aes(interval60,Wind_Speed)) + geom_line() + 
+    labs(title="Wind Speed", x="Hour", y="Wind Speed") + plotTheme(),
+  ggplot(weather.Panel, aes(interval60,Temperature)) + geom_line() + 
+    labs(title="Temperature", x="Hour", y="Temperature") + plotTheme())
+```
+
+# 3 Visualizations
+
+# 3.1 View ridership over time
+```{r}
+ggplot(rides %>%
+       group_by(interval60) %>%
+       tally())+
+  geom_line(aes(x = interval60, y = n))+
+  labs(title="Capital Bikeshare trips per hr. Wash. DC, 2021 Sep-Oct",
+       x="Date", 
+       y="Number of trips") +
+  plotTheme()
+
 ```
 
