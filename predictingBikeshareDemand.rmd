@@ -91,7 +91,6 @@ rides <- rides %>%
 ### 2.1 Filter rides without stations
 ```{r}
 
-
 rides <- dplyr::left_join(rides, docks %>% st_drop_geometry(), by =c("start_station_name" = "NAME")) %>%
             select(-LONGITUDE, - LATITUDE, -OBJECTID, -REGION_NAME) %>%
             rename(start_station_capacity = CAPACITY) %>%
