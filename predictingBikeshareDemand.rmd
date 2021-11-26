@@ -11,7 +11,7 @@ output:
     highlight: tango
 ---
 
-```{r setup, include=FALSE}
+```{r setup}
 knitr::opts_chunk$set(
 	error = FALSE,
 	message = FALSE,
@@ -19,11 +19,7 @@ knitr::opts_chunk$set(
 	cache = TRUE,
 	include = FALSE
 )
-```
 
-# Introduction
-
-```{r setup, include=FALSE}
 library(tidyverse)
 library(sf)
 library(lubridate)
@@ -55,13 +51,26 @@ root.dir = "D:/Users/Johnathan/Google Drive/Grad School/PennDesign_MUSA/PublicPo
 crs <- 'ESRI:102285' #StatePlane Maryland
 ```
 
-
+### Capital Bikeshare Data
 ```{r}
 rides <- rbind(#read.csv(file.path(root.dir,"202108-capitalbikeshare-tripdata.csv")),
               read.csv(file.path(root.dir,"202109-capitalbikeshare-tripdata.csv")),
               read.csv(file.path(root.dir,"202110-capitalbikeshare-tripdata.csv"))
               )
 
+# Retrieve location data for Capital Bikeshare dock locations
+# Remove regions except for Washington DC because we don't have the computational resources for analyzing the entire population of bikeshare locations
+# Why do station_id's not match up?????
+docks <- st_read("https://opendata.arcgis.com/datasets/a1f7acf65795451d89f0a38565a975b3_5.geojson") %>%
+  st_transform(crs) %>%
+  # mutate(STATION_ID = paste0("31", STATION_ID)) %>% # Add prefix to station id's
+  # mutate(STATION_ID = as.integer(STATION_ID)) %>%
+  dplyr::select(OBJECTID, LATITUDE, LONGITUDE, NAME, CAPACITY, REGION_NAME) %>%
+  filter(REGION_NAME == "Washington, DC")
+```
+
+
+```{r}
 rides <- rides %>%
   mutate(started_at = ymd_hms(started_at),
          ended_at = ymd_hms(ended_at),
@@ -75,31 +84,24 @@ rides <- rides %>%
                                  hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
                                  hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush")
         )
-#%>%
-  #st_as_sf(coords = c("start_lng", "start_lat"), crs=crs)
 ```
 
 
-```{r}
-# Retrieve location data for Capital Bikeshare dock locations
-# Remove regions except for Washington DC because we don't have the computational resources for analyzing the entire population of bikeshare locations
-docks <- st_read("https://opendata.arcgis.com/datasets/a1f7acf65795451d89f0a38565a975b3_5.geojson") %>%
-  st_transform(crs) %>%
-  dplyr::select(OBJECTID, LONGITUDE, LATITUDE, NAME, CAPACITY, REGION_NAME) %>%
-  filter(REGION_NAME == "Washington, DC")
-```
 
-### 2.1 Link rides with stations
+### 2.1 Filter rides without stations
 ```{r}
-startRide_docks <- 
-  dplyr::left_join(st_drop_geometry(rides), docks, by =c("start_station_name" = "NAME")) %>%
-  st_sf() %>% 
-  filter(is.na(OBJECTID) == FALSE)
 
-# endRide_docks <- 
-#   dplyr::left_join(st_drop_geometry(rides), docks, by =c("end_station_name" = "NAME")) %>%
-#   st_sf() %>% 
-#   filter(is.na(OBJECTID) == FALSE)
+
+rides <- dplyr::left_join(rides, docks %>% st_drop_geometry(), by =c("start_station_name" = "NAME")) %>%
+            select(-LONGITUDE, - LATITUDE, -OBJECTID, -REGION_NAME) %>%
+            rename(start_station_capacity = CAPACITY) %>%
+            na.omit()
+
+rides <- dplyr::left_join(test, docks %>% st_drop_geometry(), by =c("end_station_name" = "NAME")) %>%
+            select(-LONGITUDE, - LATITUDE, -OBJECTID) %>%
+            rename(end_station_capacity = CAPACITY) %>%
+            na.omit()
+
 ```
 
 ### 2.2 Weather Data
@@ -128,8 +130,8 @@ weather.Panel <-
     mutate(Temperature = ifelse(Temperature == 0, 42, Temperature))
 
 grid.arrange(top = "Weather Data - Washington, DC - September - October, 2021",
-  ggplot(weather.Panel, aes(interval60,Percipitation)) + geom_line() + 
-    labs(title="Precipitation", x="Hour", y="Percipitation") + plotTheme(),
+  ggplot(weather.Panel, aes(interval60,Precipitation)) + geom_line() + 
+    labs(title="Precipitation", x="Hour", y="Precipitation") + plotTheme(),
   ggplot(weather.Panel, aes(interval60,Wind_Speed)) + geom_line() + 
     labs(title="Wind Speed", x="Hour", y="Wind Speed") + plotTheme(),
   ggplot(weather.Panel, aes(interval60,Temperature)) + geom_line() + 
@@ -164,24 +166,24 @@ rides %>%
          x="Number of trips", 
          y="Frequency")+
     facet_wrap(~factor(time_of_day,levels=c("AM Rush", "Mid-Day", "PM Rush", "Overnight"))) +
-    plotTheme()
+  plotTheme()
 ```
 
 ```{r fig.width=10}
 ggplot(rides) +
-     geom_freqpoly(aes(hour(started_at), color = dotw), binwidth = 1) +
+  geom_freqpoly(aes(hour(started_at), color = dotw), binwidth = 1) +
   labs(title="Bike share trips in Washington DC, by day of the week, September-October, 2021",
        x="Hour", 
        y="Trip Counts") +
-     plotTheme()
+  plotTheme()
 
 
 ggplot(rides %>% mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"))) +
-     geom_freqpoly(aes(hour(started_at), color = weekend), binwidth = 1) +
+  geom_freqpoly(aes(hour(started_at), color = weekend), binwidth = 1) +
   labs(title="Bike share trips in Washington DC, by day of the week, September-October, 2021",
        x="Hour", 
        y="Trip Counts") +
-     plotTheme()
+  plotTheme()
 ```
 
 
