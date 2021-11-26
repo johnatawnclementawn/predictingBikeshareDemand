@@ -69,7 +69,12 @@ rides <- rides %>%
          interval15 = floor_date(ymd_hms(started_at), unit = "15 mins"),
          week = week(interval60),
          dotw = wday(interval60, label=TRUE)
-        ) 
+        ) %>%
+  mutate(time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
+                                 hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
+                                 hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                 hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush")
+        )
 #%>%
   #st_as_sf(coords = c("start_lng", "start_lat"), crs=crs)
 ```
@@ -133,16 +138,50 @@ grid.arrange(top = "Weather Data - Washington, DC - September - October, 2021",
 
 # 3 Visualizations
 
-# 3.1 View ridership over time
-```{r}
+### 3.1 View ridership over time
+```{r fig.width=12, fig.height=6}
 ggplot(rides %>%
        group_by(interval60) %>%
        tally())+
   geom_line(aes(x = interval60, y = n))+
-  labs(title="Capital Bikeshare trips per hr. Wash. DC, 2021 Sep-Oct",
+  labs(title="Capital Bikeshare trips per hr. Washington, DC, September-October 2021",
        x="Date", 
        y="Number of trips") +
   plotTheme()
 
 ```
+
+```{r fig.width=12, fig.height=6}
+rides %>%
+  group_by(interval60, start_station_name, time_of_day) %>%
+         tally() %>%
+  filter(n < 25) %>%
+  group_by(start_station_name, time_of_day) %>%
+  summarize(mean_trips = mean(n)) %>%
+  ggplot() +
+    geom_histogram(aes(mean_trips), binwidth = 1)+
+    labs(title="Mean Number of Hourly Trips Per Station. Washington DC, September-October, 2021",
+         x="Number of trips", 
+         y="Frequency")+
+    facet_wrap(~factor(time_of_day,levels=c("AM Rush", "Mid-Day", "PM Rush", "Overnight"))) +
+    plotTheme()
+```
+
+```{r fig.width=10}
+ggplot(rides) +
+     geom_freqpoly(aes(hour(started_at), color = dotw), binwidth = 1) +
+  labs(title="Bike share trips in Washington DC, by day of the week, September-October, 2021",
+       x="Hour", 
+       y="Trip Counts") +
+     plotTheme()
+
+
+ggplot(rides %>% mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"))) +
+     geom_freqpoly(aes(hour(started_at), color = weekend), binwidth = 1) +
+  labs(title="Bike share trips in Washington DC, by day of the week, September-October, 2021",
+       x="Hour", 
+       y="Trip Counts") +
+     plotTheme()
+```
+
 
