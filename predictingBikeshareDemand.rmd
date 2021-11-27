@@ -3,24 +3,24 @@ title: "Predicting Bikeshare Demand"
 author: "Johnathan Clementi"
 date: "11/19/2021"
 output:
-  rmdformats::downcute:
-    self_contained: true
-    thumbnails: true
-    lightbox: false
-    gallery: false
-    highlight: tango
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    code_folding: hide
+
 ---
 
-```{r setup}
+```{r setup, results='hide'}
 knitr::opts_chunk$set(
 	error = FALSE,
 	message = FALSE,
 	warning = FALSE,
-	cache = TRUE,
-	include = FALSE
+	cache = TRUE
 )
-
 library(tidyverse)
+library(tidycensus)
 library(sf)
 library(lubridate)
 library(tigris)
@@ -30,6 +30,8 @@ library(gridExtra)
 library(knitr)
 library(kableExtra)
 library(rmdformats)
+library(FNN)
+
 
 options(tigris_class = "sf")
 source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
@@ -52,25 +54,12 @@ crs <- 'ESRI:102285' #StatePlane Maryland
 ```
 
 ### Capital Bikeshare Data
-```{r}
+```{r results='hide'}
 rides <- rbind(#read.csv(file.path(root.dir,"202108-capitalbikeshare-tripdata.csv")),
               read.csv(file.path(root.dir,"202109-capitalbikeshare-tripdata.csv")),
               read.csv(file.path(root.dir,"202110-capitalbikeshare-tripdata.csv"))
               )
 
-# Retrieve location data for Capital Bikeshare dock locations
-# Remove regions except for Washington DC because we don't have the computational resources for analyzing the entire population of bikeshare locations
-# Why do station_id's not match up?????
-docks <- st_read("https://opendata.arcgis.com/datasets/a1f7acf65795451d89f0a38565a975b3_5.geojson") %>%
-  st_transform(crs) %>%
-  # mutate(STATION_ID = paste0("31", STATION_ID)) %>% # Add prefix to station id's
-  # mutate(STATION_ID = as.integer(STATION_ID)) %>%
-  dplyr::select(OBJECTID, LATITUDE, LONGITUDE, NAME, CAPACITY, REGION_NAME) %>%
-  filter(REGION_NAME == "Washington, DC")
-```
-
-
-```{r}
 rides <- rides %>%
   mutate(started_at = ymd_hms(started_at),
          ended_at = ymd_hms(ended_at),
@@ -84,6 +73,50 @@ rides <- rides %>%
                                  hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
                                  hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush")
         )
+
+```
+
+```{r pullCensus, results='hide'}
+# total pop - B25026_001E
+tractsDC <- get_acs(geography = "tract", 
+                     variables = "B25026_001E", 
+                     year=2017, 
+                     state=11999,
+                     geometry=TRUE, 
+                     output="wide") %>%
+  st_transform(crs = crs)
+
+tractsDC <- tractsDC %>%
+  select(-B25026_001M) %>%
+  mutate(natMall = case_when(GEOID == "11001006202" ~ 1,
+                             GEOID != "11001006202" ~ 0
+                             )
+         )
+
+colleges <- st_read("https://opendata.arcgis.com/datasets/0d7bedf9d582472e9ff7a6874589b545_0.geojson") %>%
+  st_transform(crs = crs) 
+
+# Help doc for this code: https://www.py4u.net/discuss/871336
+colleges$indicator <- st_intersects(colleges, tractsDC) %>% lengths > 0
+
+colleges <- colleges %>%
+  filter(indicator == TRUE) %>%
+  select(-indicator)
+```
+
+
+```{r docks, results='hide'}
+# Retrieve location data for Capital Bikeshare dock locations
+# Remove regions except for Washington DC because we don't have the computational resources for analyzing the entire population of bikeshare locations
+# Why do station_id's not match up?????
+docks <- st_read("https://opendata.arcgis.com/datasets/a1f7acf65795451d89f0a38565a975b3_5.geojson") %>%
+  st_transform(crs) %>%
+  # mutate(STATION_ID = paste0("31", STATION_ID)) %>% # Add prefix to station id's
+  # mutate(STATION_ID = as.integer(STATION_ID)) %>%
+  dplyr::select(OBJECTID, LATITUDE, LONGITUDE, NAME, CAPACITY, REGION_NAME) %>%
+  filter(REGION_NAME == "Washington, DC") %>%
+  mutate(nn_college = nn_function(st_coordinates(.), st_coordinates(colleges), 1))
+
 ```
 
 
@@ -93,12 +126,14 @@ rides <- rides %>%
 
 rides <- dplyr::left_join(rides, docks %>% st_drop_geometry(), by =c("start_station_name" = "NAME")) %>%
             select(-LONGITUDE, - LATITUDE, -OBJECTID, -REGION_NAME) %>%
-            rename(start_station_capacity = CAPACITY) %>%
+            rename(start_station_capacity = CAPACITY,
+                   start_station_nnCollege = nn_college) %>%
             na.omit()
 
-rides <- dplyr::left_join(test, docks %>% st_drop_geometry(), by =c("end_station_name" = "NAME")) %>%
+rides <- dplyr::left_join(rides, docks %>% st_drop_geometry(), by =c("end_station_name" = "NAME")) %>%
             select(-LONGITUDE, - LATITUDE, -OBJECTID) %>%
-            rename(end_station_capacity = CAPACITY) %>%
+            rename(end_station_capacity = CAPACITY,
+                   end_station_nnCollege = nn_college) %>%
             na.omit()
 
 ```
@@ -144,7 +179,7 @@ grid.arrange(top = "Weather Data - Washington, DC - September - October, 2021",
 ggplot(rides %>%
        group_by(interval60) %>%
        tally())+
-  geom_line(aes(x = interval60, y = n))+
+  geom_line(aes(x = interval60, y = n), size = 0.6, colour = "red") +
   labs(title="Capital Bikeshare trips per hr. Washington, DC, September-October 2021",
        x="Date", 
        y="Number of trips") +
