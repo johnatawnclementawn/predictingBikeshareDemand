@@ -355,11 +355,6 @@ study.panel <-
               group_by(start_station_id) %>%
               slice(1), by = c("start_station" = "start_station_id"))
 
-ride.panel <- 
-  left_join(ride.panel, chicagoCensus %>%
-              as.data.frame() %>%
-              select(-geometry), by = c("Origin.Tract" = "GEOID"))
-
 nrow(study.panel)
 
 ride.panel <- rides %>%
@@ -372,6 +367,10 @@ ride.panel <- rides %>%
   filter(is.na(start_station_id) == FALSE) %>%
   mutate(week = week(interval60),
          dotw = wday(interval60, label = TRUE))
+
+# ride.panel <- 
+#   left_join(ride.panel, rides_tracts %>%
+#               as.data.frame(), by = c("Origin.Tract" = "GEOID"))
 ```
 
 ### .4 Create Time Lags
