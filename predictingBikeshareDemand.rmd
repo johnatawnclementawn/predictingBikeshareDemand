@@ -111,6 +111,37 @@ tractsDC <- get_acs(geography = "tract",
   mutate(natMall = case_when(GEOID == "11001006202" ~ 1,
                              GEOID != "11001006202" ~ 0))
 
+
+rides_tracts <- st_join(rides %>% 
+          filter(is.na(start_lng) == FALSE &
+                   is.na(start_lat) == FALSE &
+                   is.na(end_lat) == FALSE &
+                   is.na(end_lng) == FALSE) %>%
+          st_as_sf(., coords = c("start_lng", "start_lat"), crs = 4326),
+        tractsDC %>%
+          st_transform(crs=4326),
+        join=st_intersects,
+              left = TRUE) %>%
+  rename(Origin.Tract = GEOID) %>%
+  mutate(start_lng = unlist(map(geometry, 1)),
+         start_lat = unlist(map(geometry, 2)))%>%
+  as.data.frame() %>%
+  select(-geometry)%>%
+  st_as_sf(., coords = c("end_lng", "end_lat"), crs = 4326) %>%
+  st_join(., tractsDC %>%
+            st_transform(crs=4326),
+          join=st_intersects,
+          left = TRUE) %>%
+  rename(Destination.Tract = GEOID)  %>%
+  mutate(end_lng = unlist(map(geometry, 1)),
+         end_lat = unlist(map(geometry, 2)))%>%
+  as.data.frame() %>%
+  select(-geometry)
+
+```
+
+
+```{r colleges, results='hide'}
 colleges <- st_read("https://opendata.arcgis.com/datasets/0d7bedf9d582472e9ff7a6874589b545_0.geojson") %>%
   st_transform(crs = crs) 
 
@@ -129,11 +160,15 @@ colleges <- colleges %>%
 # Why do station_id's not match up?????
 docks <- st_read("https://opendata.arcgis.com/datasets/a1f7acf65795451d89f0a38565a975b3_5.geojson") %>%
   st_transform(crs) %>%
-  # mutate(STATION_ID = paste0("31", STATION_ID)) %>% # Add prefix to station id's
-  # mutate(STATION_ID = as.integer(STATION_ID)) %>%
   dplyr::select(OBJECTID, LATITUDE, LONGITUDE, NAME, CAPACITY, REGION_NAME) %>%
   filter(REGION_NAME == "Washington, DC") %>%
   mutate(nn_college = nn_function(st_coordinates(.), st_coordinates(colleges), 1))
+
+docks_Geom <- docks %>%
+  as.data.frame() %>%
+  distinct(NAME, .keep_all = TRUE) %>%
+  select(NAME, geometry) %>% 
+  st_sf
 
 ```
 
@@ -149,6 +184,19 @@ rides <- dplyr::left_join(rides, docks %>% st_drop_geometry(), by =c("start_stat
             na.omit()
 
 rides <- dplyr::left_join(rides, docks %>% st_drop_geometry(), by =c("end_station_name" = "NAME")) %>%
+            select(-LONGITUDE, - LATITUDE, -OBJECTID) %>%
+            rename(end_station_capacity = CAPACITY,
+                   end_station_nnCollege = nn_college) %>%
+            na.omit()
+
+
+rides_tracts <- dplyr::left_join(rides_tracts, docks %>% st_drop_geometry(), by =c("start_station_name" = "NAME")) %>%
+            select(-LONGITUDE, - LATITUDE, -OBJECTID, -REGION_NAME) %>%
+            rename(start_station_capacity = CAPACITY,
+                   start_station_nnCollege = nn_college) %>%
+            na.omit()
+
+rides_tracts <- dplyr::left_join(rides_tracts, docks %>% st_drop_geometry(), by =c("end_station_name" = "NAME")) %>%
             select(-LONGITUDE, - LATITUDE, -OBJECTID) %>%
             rename(end_station_capacity = CAPACITY,
                    end_station_nnCollege = nn_college) %>%
@@ -306,6 +354,11 @@ study.panel <-
               distinct() %>%
               group_by(start_station_id) %>%
               slice(1), by = c("start_station" = "start_station_id"))
+
+ride.panel <- 
+  left_join(ride.panel, chicagoCensus %>%
+              as.data.frame() %>%
+              select(-geometry), by = c("Origin.Tract" = "GEOID"))
 
 nrow(study.panel)
 
