@@ -77,7 +77,8 @@ rides <- rides %>%
                                  hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
                                  hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
                                  hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush")
-        )
+        ) %>%
+  filter(start_station_name != "Arizona Ave & MacArthur Blvd NW")
 
 ```
 
@@ -402,29 +403,33 @@ as.data.frame(ride.panel) %>%
 ## 4.1. Run Models
 
 ```{r train_test}
-ride.Train <- filter(ride.panel, week <= 40)
-ride.Test <- filter(ride.panel, (week > 40) & (week <= 42))
+ride.Train <- filter(ride.panel, week >= 37)
+ride.Test <- filter(ride.panel, (week >= 35) & (week <= 36))
+
+# Remove stops that are in test or train, but not in the other
+removeList <- rbind(anti_join(ride.Train, ride.Test, by = "start_station_name"),
+                    anti_join(ride.Test, ride.Train, by = "start_station_id")) %>%
+              select(start_station_name)
+
+removeList <- unique(removeList$start_station_name)
+
+ride.Train <- ride.Train[!ride.Train$start_station_name %in% removeList,]
+ride.Test <- ride.Test[!ride.Test$start_station_name %in% removeList,]
+
 ```
 
 ```{r five_models }
 # Temporal Only
-reg1 <- 
-  lm(Trip_Count ~  hour(interval60) + dotw + Temperature,  data=ride.Train)
+reg1 <- lm(Trip_Count ~  hour(interval60) + dotw + Temperature + Precipitation + Wind_Speed, data=ride.Train)
 
-# Spatial Only
-reg2 <- 
-  lm(Trip_Count ~  start_station_name + dotw + Temperature,  data=ride.Train)
+# Spatial only
+reg2 <- lm(Trip_Count ~  start_station_id + Temperature + Precipitation + Wind_Speed, data=ride.Train)
 
-# Spatiotemporal
-reg3 <- 
-  lm(Trip_Count ~  start_station_name + hour(interval60) + dotw + Temperature + Precipitation, 
-     data=ride.Train)
+# spatiotemporal
+reg3 <- lm(Trip_Count ~  start_station_id + hour(interval60) + dotw + Temperature + Precipitation + Wind_Speed, data=ride.Train)
 
-# Time lagged
-reg4 <- 
-  lm(Trip_Count ~  start_station_name +  hour(interval60) + dotw + Temperature + Precipitation +
-                   lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day, 
-     data=ride.Train)
+#spatiotemporal with lags
+reg4 <- lm(Trip_Count ~  start_station_id +  hour(interval60) + dotw + Temperature + Precipitation + Wind_Speed +lagHour + lag2Hours + lag3Hours + lag1day, data=ride.Train)
 ```
 
 ## Test data predictions
@@ -451,3 +456,29 @@ week_predictions <-
 
 ```
 
+```{r plot_errors_by_model}
+week_predictions %>%
+  dplyr::select(week, Regression, MAE) %>%
+  gather(Variable, MAE, -Regression, -week) %>%
+  ggplot(aes(week, MAE)) + 
+    geom_bar(aes(fill = Regression), position = "dodge", stat="identity") +
+    scale_fill_manual(values = palette5) +
+    labs(title = "Mean Absolute Errors by model specification and week") +
+  plotTheme()
+```
+
+```{r error_vs_actual_timeseries, fig.width=12, fig.height=8}
+week_predictions %>% 
+    mutate(interval60 = map(data, pull, interval60),
+           start_station_id = map(data, pull, start_station_id)) %>%
+    dplyr::select(interval60, start_station_id, Observed, Prediction, Regression) %>%
+    unnest() %>%
+    gather(Variable, Value, -Regression, -interval60, -start_station_id) %>%
+    group_by(Regression, Variable, interval60) %>%
+    summarize(Value = sum(Value)) %>%
+    ggplot(aes(interval60, Value, colour=Variable)) + 
+      geom_line(size = 1.1) + 
+      facet_wrap(~Regression, ncol=1) +
+      labs(title = "Predicted/Observed bike share time series", subtitle = "Washington DC; A test set of 2 weeks",  x = "Hour", y= "Station Trips") +
+      plotTheme()
+```
