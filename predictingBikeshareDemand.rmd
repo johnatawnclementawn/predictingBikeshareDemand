@@ -29,6 +29,7 @@ library(sf)
 library(lubridate)
 library(tigris)
 library(gganimate)
+library(gifski)
 library(riem)
 library(gridExtra)
 library(knitr)
@@ -342,10 +343,46 @@ grid.arrange(nrow = 2,
 )
 ```
 
+```{r annimation}
+rides.annimation.df <- rides %>%
+  filter(week == 40 & dotw == "Mon") %>%
+  mutate(Trip_Counter = 1) %>%
+  group_by(interval15, start_station_id, start_station_name) %>%
+  summarize(Trip_Count = sum(Trip_Counter, na.rm=T)) %>%
+  left_join(., docks, by =c("start_station_name" = "NAME")) %>%
+  st_sf() %>%
+  ungroup() %>%
+  mutate(Trips = case_when(Trip_Count == 0 ~ "0 trips",
+          Trip_Count > 0 & Trip_Count <= 3 ~ "1-3 trips",
+          Trip_Count > 3 & Trip_Count <= 6 ~ "4-6 trips",
+          Trip_Count > 6 & Trip_Count <= 10 ~ "7-10 trips",
+          Trip_Count > 10 ~ "11+ trips")) %>%
+  mutate(Trips  = fct_relevel(Trips, "0 trips","1-3 trips","4-6 trips",
+  "7-10 trips","10+ trips")) %>%
+  arrange(Trips)
+
+ride_annimation <- 
+  ggplot()+
+  geom_sf(data = tractsDC) +
+  geom_point(data = rides.annimation.df,
+          aes(color=Trip_Count, size = Trip_Count, geometry = geometry),
+          stat = "sf_coordinates",
+          fill = "transparent", alpha = 0.6)+
+  scale_colour_viridis_c(direction = 1, option = "magma")+
+  # ylim(min(rides$start_lat), max(rides$start_lat))+
+  # xlim(min(rides$start_lng), max(rides$start_lng))+
+  labs(title="Capital Bikeshare trip origins in Washington DC\nMonday, October 4th, 2021",
+       subtitle = "15 minute intervals: {current_frame}") +
+  mapTheme() +
+  transition_manual(interval15)
+
+animate(ride_annimation, duration=20, renderer = gifski_renderer())
+```
+
 
 ### 2.3 Create space/time panel
 ```{r}
-length(unique(rides$interval60)) * length(unique(rides$start_station_id))
+# length(unique(rides$interval60)) * length(unique(rides$start_station_id))
 
 study.panel <- 
   expand.grid(interval60 = unique(rides$interval60), 
@@ -356,7 +393,7 @@ study.panel <-
               group_by(start_station_id) %>%
               slice(1), by = c("start_station" = "start_station_id"))
 
-nrow(study.panel)
+# nrow(study.panel)
 
 ride.panel <- rides %>%
   mutate(Trip_Counter = 1) %>%
@@ -400,15 +437,17 @@ as.data.frame(ride.panel) %>%
 ```
 
 
+
+
 ## 4.1. Run Models
 
 ```{r train_test}
-ride.Train <- filter(ride.panel, week >= 37)
-ride.Test <- filter(ride.panel, (week >= 35) & (week <= 36))
+ride.Train <- filter(ride.panel, (week >= 35) & (week <= 40))
+ride.Test <- filter(ride.panel, week >= 41)
 
 # Remove stops that are in test or train, but not in the other
 removeList <- rbind(anti_join(ride.Train, ride.Test, by = "start_station_name"),
-                    anti_join(ride.Test, ride.Train, by = "start_station_id")) %>%
+                    anti_join(ride.Test, ride.Train, by = "start_station_name")) %>%
               select(start_station_name)
 
 removeList <- unique(removeList$start_station_name)
@@ -418,18 +457,22 @@ ride.Test <- ride.Test[!ride.Test$start_station_name %in% removeList,]
 
 ```
 
-```{r five_models }
+```{r four_models }
 # Temporal Only
-reg1 <- lm(Trip_Count ~  hour(interval60) + dotw + Temperature + Precipitation + Wind_Speed, data=ride.Train)
+reg1 <- lm(Trip_Count ~  hour(interval60) , data=ride.Train)
+summary(reg1)
 
 # Spatial only
 reg2 <- lm(Trip_Count ~  start_station_id + Temperature + Precipitation + Wind_Speed, data=ride.Train)
+summary(reg2)
 
 # spatiotemporal
 reg3 <- lm(Trip_Count ~  start_station_id + hour(interval60) + dotw + Temperature + Precipitation + Wind_Speed, data=ride.Train)
+summary(reg3)
 
 #spatiotemporal with lags
 reg4 <- lm(Trip_Count ~  start_station_id +  hour(interval60) + dotw + Temperature + Precipitation + Wind_Speed +lagHour + lag2Hours + lag3Hours + lag1day, data=ride.Train)
+summary(reg4)
 ```
 
 ## Test data predictions
@@ -482,3 +525,26 @@ week_predictions %>%
       labs(title = "Predicted/Observed bike share time series", subtitle = "Washington DC; A test set of 2 weeks",  x = "Hour", y= "Station Trips") +
       plotTheme()
 ```
+
+```{r errors_by_station, warning = FALSE, message = FALSE }
+week_predictions %>% 
+    mutate(interval60 = map(data, pull, interval60),
+           start_station_id = map(data, pull, start_station_id), 
+           start_lat = map(data, pull, start_lat), 
+           start_lng = map(data, pull, start_lng)) %>%
+    select(interval60, start_station_id, start_lng, start_lat, Observed, Prediction, Regression) %>%
+    unnest() %>%
+  filter(Regression == "DTime_Space_FE_timeLags") %>%
+  group_by(start_station_id, start_lng, start_lat) %>%
+  summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
+ggplot(.)+
+  #geom_sf(data = tractsDC, color = "grey", fill = "transparent")+
+  geom_point(aes(x = start_lng, y = start_lat, color = MAE), 
+             fill = "transparent", alpha = 0.4)+
+  scale_colour_viridis_c(direction = -1, option = "D")+
+  # ylim(min(dat_census$start_lat), max(dat_census$start_lat))+
+  # xlim(min(dat_census$start_lng), max(dat_census$start_lng))+
+  labs(title="Mean Abs Error, Test Set, Model 5")+
+  mapTheme()
+```
+  
