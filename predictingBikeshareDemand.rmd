@@ -36,6 +36,7 @@ library(knitr)
 library(kableExtra)
 library(rmdformats)
 library(FNN)
+library(caret)
 
 
 options(tigris_class = "sf")
@@ -531,16 +532,18 @@ week_predictions %>%
     mutate(interval60 = map(data, pull, interval60),
            start_station_id = map(data, pull, start_station_id), 
            start_lat = map(data, pull, start_lat), 
-           start_lng = map(data, pull, start_lng)) %>%
-    select(interval60, start_station_id, start_lng, start_lat, Observed, Prediction, Regression) %>%
+           start_lng = map(data, pull, start_lng),
+           start_station_name = map(data,pull,start_station_name)) %>%
+    select(interval60, start_station_id, start_lng, start_lat, start_station_name, Observed, Prediction, Regression) %>%
     unnest() %>%
+  left_join(., docks, by =c("start_station_name" = "NAME")) %>%
+  st_sf() %>%
   filter(Regression == "DTime_Space_FE_timeLags") %>%
   group_by(start_station_id, start_lng, start_lat) %>%
-  summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
+  summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE)) %>%
 ggplot(.)+
-  #geom_sf(data = tractsDC, color = "grey", fill = "transparent")+
-  geom_point(aes(x = start_lng, y = start_lat, color = MAE), 
-             fill = "transparent", alpha = 0.4)+
+  geom_sf(data = tractsDC, color = "grey", fill = "transparent") +
+  geom_sf(aes(color = MAE), fill = "transparent", alpha = 0.4) +
   scale_colour_viridis_c(direction = -1, option = "D")+
   # ylim(min(dat_census$start_lat), max(dat_census$start_lat))+
   # xlim(min(dat_census$start_lng), max(dat_census$start_lng))+
@@ -548,3 +551,68 @@ ggplot(.)+
   mapTheme()
 ```
   
+```{r obs_pred_all, warning=FALSE, message = FALSE, cache=TRUE}
+week_predictions %>% 
+    mutate(interval60 = map(data, pull, interval60),
+           start_station_id = map(data, pull, start_station_id), 
+           start_lat = map(data, pull, start_lat), 
+           start_lng = map(data, pull, start_lng),
+           dotw = map(data, pull, dotw)) %>%
+    select(interval60, start_station_id, start_lng, 
+           start_lng, Observed, Prediction, Regression,
+           dotw) %>%
+    unnest() %>%
+  filter(Regression == "DTime_Space_FE_timeLags")%>%
+  mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
+         time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
+                                 hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
+                                 hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                 hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush"))%>%
+  ggplot()+
+  geom_point(aes(x= Observed, y = Prediction))+
+    geom_smooth(aes(x= Observed, y= Prediction), method = "lm", se = FALSE, color = "red")+
+    geom_abline(slope = 1, intercept = 0)+
+  facet_grid(time_of_day~weekend)+
+  labs(title="Observed vs Predicted",
+       x="Observed trips", 
+       y="Predicted trips")+
+  plotTheme()
+```
+
+# Cross Validation
+```{r}
+ride.crossVal <- ride.Test %>% filter(week %in% c(42,44)) %>%
+  left_join(., docks, by =c("start_station_name" = "NAME")) %>%
+  st_sf()
+
+fitControl <- trainControl(method = "cv", 
+                                   number = 50)
+set.seed(717)
+
+reg4.cv <- 
+  train (Trip_Count ~  start_station_id +  hour(interval60) + dotw + Temperature + Precipitation + Wind_Speed +lagHour + lag2Hours + lag3Hours, data=ride.crossVal,
+               method = "lm", 
+               trControl = fitControl, 
+               na.action = na.pass)
+reg4.cv
+```
+
+
+```{r}
+kable(reg4.cv$resample) %>% 
+  kable_styling(font_size = 12, full_width = F,
+                bootstrap_options = c("striped", "hover", "condensed")) %>%
+  footnote(general = "Table 5.3 Cross-validation Test on Model D",
+           general_title= '\n') %>%
+  scroll_box(width = "100%", height = "200px")
+
+ggplot(data = reg4.cv$resample) +
+  geom_histogram(aes(x = reg4.cv$resample$MAE), fill = '#88aab8') +
+  labs(title="Distribution of Cross-validation MAE on Model D",
+       subtitle = "K = 50",
+       caption = "Figure 5.3 ") +
+  xlab('MAE of Model 4') +
+  ylab('Count') +
+  plotTheme()
+```
+
