@@ -20,6 +20,12 @@ knitr::opts_chunk$set(
 	cache = TRUE
 )
 ```
+# 1. Introduction
+![Capital Bikeshare bikes in front of the National Capitol Building](D:/Users/Johnathan/Google Drive/Grad School/PennDesign_MUSA/PublicPolicyAnalytics/predictingBikeshareDemand/bikes_outside_metro.jpg)
+
+In the past decade, cities such as New York, Chicago, and Philadelphia have welcomed the installation of docked bike-sharing systems which allow users to pay a small fee to rent a bicycle. As an alternative to vehicular transportation, bike-share allows riders the convenience of an agile and healthy way to get from point A to point B without needing to worry about maintenance costs or the possibility of their bike being stolen. The rider simply checks a bike out at a station, rides to their destination, and checks the bike in at another station. For operators of these systems, it is critical to ensure that bikes are balanced across the network of stations. If there are too few bikes at a station, ridership will decrease due to lack of bike supply. If there are too many bikes at a station, riders will be frustrated if they need to ride to a station further from their desired destination with more spaces and eventually stop using the service.    
+For these reasons, it is imperative that bike-share systems rebalance bike supply based on rider demand. Systems have developed a few methods for addressing rebalancing. The first is utilizing trucks to move bikes to higher demand stations. The second is to incentivize users riding bikes to higher origin demand stations (stations that regularly have too few bikes) by giving those riders a credit for the service. How then, do system operators decide which stations need bikes and which stations can spare bikes? In this study, we examine how spatial and temporal forecasting can help systems answer this question. The system in question is Capital Bikeshare in Washington DC.   
+The Capital Bikeshare (CaBi) is a successful bike sharing business located in Washington DC. It has been in business since 2010 and is currently operated by the bikeshare operator, Motivate, which also operates several other systems in the US. CaBi currently has over 630 stations and 5400 bikes, which have served an average of about 7622 riders daily in 2021.    
 
 
 ```{r libraries, results='hide'}
@@ -48,7 +54,7 @@ palette2 <- c("#6baed6","#08519c")
 ```
 
 
-# 2 Data Wrangling
+# 2. Data Wrangling
 
 Capital Bikeshare ride data obtained from this [link](https://s3.amazonaws.com/capitalbikeshare-data/index.html)   
 More information about these data can be found at this [link](https://www.capitalbikeshare.com/system-data)
@@ -59,7 +65,8 @@ root.dir = "D:/Users/Johnathan/Google Drive/Grad School/PennDesign_MUSA/PublicPo
 crs <- 'ESRI:102285' #StatePlane Maryland
 ```
 
-### Capital Bikeshare Data
+### 2.1. Capital Bikeshare Data
+In the code chunks below, we clean the data for use. Code is hidden for ease of readability, but you can reveal the code by hitting the `code` button on the right.
 ```{r results='hide'}
 rides <- rbind(#read.csv(file.path(root.dir,"202108-capitalbikeshare-tripdata.csv")),
               read.csv(file.path(root.dir,"202109-capitalbikeshare-tripdata.csv")),
@@ -83,6 +90,40 @@ rides <- rides %>%
   filter(start_station_name != "Arizona Ave & MacArthur Blvd NW")
 
 ```
+
+```{r avgRidership2021, eval=FALSE, include=FALSE}
+rides2020 <- rbind(
+  read.csv(file.path(root.dir,"202101-capitalbikeshare-tripdata.csv")),
+  read.csv(file.path(root.dir,"202102-capitalbikeshare-tripdata.csv")),
+  read.csv(file.path(root.dir,"202103-capitalbikeshare-tripdata.csv")),
+  read.csv(file.path(root.dir,"202104-capitalbikeshare-tripdata.csv")),
+  read.csv(file.path(root.dir,"202105-capitalbikeshare-tripdata.csv")),
+  read.csv(file.path(root.dir,"202106-capitalbikeshare-tripdata.csv")),
+  read.csv(file.path(root.dir,"202107-capitalbikeshare-tripdata.csv")),
+  read.csv(file.path(root.dir,"202108-capitalbikeshare-tripdata.csv")),
+  read.csv(file.path(root.dir,"202109-capitalbikeshare-tripdata.csv")),
+  read.csv(file.path(root.dir,"202110-capitalbikeshare-tripdata.csv"))
+)
+
+rides2020 <- rides2020 %>%
+  mutate(started_at = ymd_hms(started_at),
+         ended_at = ymd_hms(ended_at),
+         interval60 = floor_date(ymd_hms(started_at), unit = "hour"),
+         interval15 = floor_date(ymd_hms(started_at), unit = "15 mins"),
+         day = yday(interval60),
+         week = week(interval60),
+         dotw = wday(interval60, label=TRUE)
+  )
+
+
+groupedRides <- rides2020 %>%
+  group_by(day) %>%
+  tally()
+
+mean(groupedRides$n)
+```
+
+
 
 ```{r pullCensus, results='hide'}
 # total pop - B25026_001E
@@ -176,8 +217,6 @@ docks_Geom <- docks %>%
 ```
 
 
-
-### 2.1 Filter rides without stations
 ```{r}
 
 rides <- dplyr::left_join(rides, docks %>% st_drop_geometry(), by =c("start_station_name" = "NAME")) %>%
@@ -193,21 +232,22 @@ rides <- dplyr::left_join(rides, docks %>% st_drop_geometry(), by =c("end_statio
             na.omit()
 
 
-rides_tracts <- dplyr::left_join(rides_tracts, docks %>% st_drop_geometry(), by =c("start_station_name" = "NAME")) %>%
-            select(-LONGITUDE, - LATITUDE, -OBJECTID, -REGION_NAME) %>%
-            rename(start_station_capacity = CAPACITY,
-                   start_station_nnCollege = nn_college) %>%
-            na.omit()
-
-rides_tracts <- dplyr::left_join(rides_tracts, docks %>% st_drop_geometry(), by =c("end_station_name" = "NAME")) %>%
-            select(-LONGITUDE, - LATITUDE, -OBJECTID) %>%
-            rename(end_station_capacity = CAPACITY,
-                   end_station_nnCollege = nn_college) %>%
-            na.omit()
+# rides_tracts <- dplyr::left_join(rides_tracts, docks %>% st_drop_geometry(), by =c("start_station_name" = "NAME")) %>%
+#             select(-LONGITUDE, - LATITUDE, -OBJECTID, -REGION_NAME) %>%
+#             rename(start_station_capacity = CAPACITY,
+#                    start_station_nnCollege = nn_college) %>%
+#             na.omit()
+# 
+# rides_tracts <- dplyr::left_join(rides_tracts, docks %>% st_drop_geometry(), by =c("end_station_name" = "NAME")) %>%
+#             select(-LONGITUDE, - LATITUDE, -OBJECTID) %>%
+#             rename(end_station_capacity = CAPACITY,
+#                    end_station_nnCollege = nn_college) %>%
+#             na.omit()
 
 ```
 
 ### 2.2 Weather Data
+We hypothesize that weather is a driver of bikeshare. The idea is that undesirable precipitation, wind, and temperature will drive down ridership.
 ```{r fig.width=12, fig.height= 10}
 # riem_networks <- riem_networks()
 # vaStations <- riem_stations("VA_ASOS") %>%
@@ -242,9 +282,10 @@ grid.arrange(top = "Weather Data - Washington, DC - September - October, 2021",
 ```
 
 
-# 3 Visualizations
+# 3. Ridership Visualizations
 
-### 3.1 View ridership over time
+### 3.1. View ridership over time
+In this first figure, we see that precipitation indeed drives ridership. Blue lines indicate hourly precipitaiton greater than 0.1 inches. Hourly ridership is visualized by the black line.
 ```{r fig.width=12, fig.height=6}
 precipHours <- weather.Panel %>%
   filter(Precipitation > 0.1) %>%
@@ -262,7 +303,7 @@ ggplot(rides %>%
   plotTheme()
 
 ```
-
+The next two figures point out the temporal patterns in ridership. Many stations have high ridership in the PM Rush and do not have much ridership in the overnight hours.
 ```{r fig.width=12, fig.height=6}
 rides %>%
   group_by(interval60, start_station_name, time_of_day) %>%
@@ -291,6 +332,8 @@ ggplot(rides %>%
   plotTheme()
 ```
 
+
+The next two figures are particularly interesting because they point to the difference in CaBi rider demographics. We hypothesize that there are two general populations of CaBi riders: 1. the commuters, who drive the weekday peaks in the AM and PM rush hours. And 2. the tourists, who drive the weekend peak in the mid-day hours.
 ```{r fig.width=10}
 ggplot(rides) +
   geom_freqpoly(aes(hour(started_at), color = dotw), size = 1, binwidth = 1) +
@@ -308,7 +351,7 @@ ggplot(rides %>% mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "
        y="Trip Counts") +
   plotTheme()
 ```
-
+Below are a series of maps illustrating the distribution of trip origins and destinations across the District. 
 ```{r origin_map, fig.width=12, fig.height=12}
 grid.arrange(nrow = 2,
   ggplot()+
@@ -343,9 +386,9 @@ grid.arrange(nrow = 2,
     mapTheme()
 )
 ```
-
-```{r annimation}
-rides.annimation.df <- rides %>%
+This animation is a great way to visualize the temporal distribution of ridership. It's clear that most trips are originating from DC's core around the National Mall and the business district that extends northward.
+```{r animation}
+rides.animation.df <- rides %>%
   filter(week == 40 & dotw == "Mon") %>%
   mutate(Trip_Counter = 1) %>%
   group_by(interval15, start_station_id, start_station_name) %>%
@@ -362,10 +405,10 @@ rides.annimation.df <- rides %>%
   "7-10 trips","10+ trips")) %>%
   arrange(Trips)
 
-ride_annimation <- 
+ride_animation <- 
   ggplot()+
   geom_sf(data = tractsDC) +
-  geom_point(data = rides.annimation.df,
+  geom_point(data = rides.animation.df,
           aes(color=Trip_Count, size = Trip_Count, geometry = geometry),
           stat = "sf_coordinates",
           fill = "transparent", alpha = 0.6)+
@@ -377,11 +420,12 @@ ride_annimation <-
   mapTheme() +
   transition_manual(interval15)
 
-animate(ride_annimation, duration=20, renderer = gifski_renderer())
+animate(ride_animation, duration=20, renderer = gifski_renderer())
 ```
 
 
-### 2.3 Create space/time panel
+# 4. Analysis 
+### 4.1. Create space/time panel
 ```{r}
 # length(unique(rides$interval60)) * length(unique(rides$start_station_id))
 
@@ -412,7 +456,7 @@ ride.panel <- rides %>%
 #               as.data.frame(), by = c("Origin.Tract" = "GEOID"))
 ```
 
-### .4 Create Time Lags
+### 4.2. Create Time Lags
 ```{r}
 ride.panel <- ride.panel %>% 
   arrange(start_station_id, interval60) %>% 
@@ -425,7 +469,7 @@ ride.panel <- ride.panel %>%
   mutate(day = yday(interval60))
 ```
 
-
+Here we examine the correlation of station trip origination with the number of trips originating from that same station 1, 2, 3, 4, 12, and 24 hours prior. These so-called 'time-lags' are tend to be strong predictors of ridership.
 ```{r}
 as.data.frame(ride.panel) %>%
     group_by(interval60) %>% 
@@ -440,8 +484,7 @@ as.data.frame(ride.panel) %>%
 
 
 
-## 4.1. Run Models
-
+## 4.3. Run Models
 ```{r train_test}
 ride.Train <- filter(ride.panel, (week >= 35) & (week <= 40))
 ride.Test <- filter(ride.panel, week >= 41)
@@ -476,7 +519,7 @@ reg4 <- lm(Trip_Count ~  start_station_id +  hour(interval60) + dotw + Temperatu
 summary(reg4)
 ```
 
-## Test data predictions
+### 4.4. Test data predictions
 ```{r}
 ride.Test.weekNest <- 
   ride.Test %>%
@@ -579,7 +622,7 @@ week_predictions %>%
   plotTheme()
 ```
 
-# Cross Validation
+# 5. Cross Validation
 ```{r}
 ride.crossVal <- ride.Test %>% filter(week %in% c(42,44)) %>%
   left_join(., docks, by =c("start_station_name" = "NAME")) %>%
@@ -616,3 +659,5 @@ ggplot(data = reg4.cv$resample) +
   plotTheme()
 ```
 
+# 6. Conclusions
+While, strong predictors of ridership, and thus the ability to re-balance bikes across the network, were identified, the models presented in this study still need further tuning. While results shown in the Predicted vs Observed bike share time series figure indicate that the models can predict ridership well, goodness-of-fit metrics yield a different story, with a high Mean Absolute Error (MAE) of 1.44 and high Root-Mean-Squared-Error (RMSE) of 2.1. Further studies could allow for better generalizability across socioeconomic and spatial contexts. There is clearly a spatial process at play with regards to stations in the core of the District.
